@@ -123,6 +123,57 @@ func TraceRequest(tr opentracing.Tracer, req *http.Request, options ...ClientOpt
 	return req, ht
 }
 
+// TraceContext adds a ClientTracer to the context.  The context will need to be
+// added to the request when it is being created.  This handles many of the cases
+// for use with third party libraries and swagger build client code.
+//
+// Example of swagger:
+//
+// 	func GetClient(ctx context.Context) error {
+//		params := swag_rest.NewClientParams()
+//
+//		//Build the transport to handle the REST Call
+//		httpclienttransport := &nethttp.Transport{}
+//		httpclient := &http.Client{
+//			Transport: httpclienttransport,
+//		}
+//		params.SetHTTPClient(httpclient)
+//
+//		//Build Context
+//		if ctx == nil {
+//			ctx = context.Background()
+//		}
+//		ctx, ht := nethttp.TraceContext(opentracing.GlobalTracer(), ctx)
+//		defer ht.Finish()
+//		params.SetContext(ctx)
+//
+//		//Client REST Call
+//		resp, err := client.GetClient(params)
+//
+//		return err
+//	}
+func TraceContext(tr opentracing.Tracer, inctx context.Context, options ...ClientOption) (context.Context, *Tracer) {
+	opts := &clientOptions{
+		spanObserver: func(_ opentracing.Span, _ *http.Request) {},
+	}
+	for _, opt := range options {
+		opt(opts)
+	}
+	ht := &Tracer{tr: tr, opts: opts}
+
+	ctx := inctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if !opts.disableClientTrace {
+		ctx = httptrace.WithClientTrace(ctx, ht.clientTrace())
+	}
+
+	ctx = context.WithValue(ctx, keyTracer, ht)
+	return ctx, ht
+}
+
 type closeTracker struct {
 	io.ReadCloser
 	sp opentracing.Span
